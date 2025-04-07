@@ -60,6 +60,7 @@ def get_blocked_dids(client):
         st.warning(f"⚠️ Could not retrieve block list: {e}")
     return blocked_dids
 
+# === MAIN WORKFLOW ===
 if run_button and username and app_password:
     st.warning("⏳ This may take a few minutes. We'll fetch your followers and profile info, please wait...")
 
@@ -77,7 +78,6 @@ if run_button and username and app_password:
     followers = get_all_followers(client, username, max_profiles)
 
     eligible = []
-
     progress_bar = st.progress(0)
     for i, user in enumerate(followers):
         try:
@@ -91,48 +91,54 @@ if run_button and username and app_password:
         except Exception as e:
             st.warning(f"⚠️ Could not fetch profile for @{user.handle}: {e}")
         progress_bar.progress((i + 1) / len(followers))
-
     progress_bar.empty()
+
+    st.session_state.eligible_users = eligible
     st.success(f"✅ Found {len(eligible)} new user(s) to potentially block.")
 
-    if eligible:
-        num_to_block = st.slider("How many users do you want to block?", 1, len(eligible), value=min(len(eligible), 50))
-        confirm = st.button("🚫 Block Now")
+# === BLOCK UI ===
+if "eligible_users" in st.session_state and st.session_state.eligible_users:
+    eligible = st.session_state.eligible_users
+    num_to_block = st.slider("How many users do you want to block?", 1, len(eligible), value=min(len(eligible), 50))
 
-        if confirm:
-            st.info("🚫 Blocking users... please wait...")
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        confirm = st.button("🚫 Block Now", use_container_width=True)
 
-            blocked = 0
-            with open(CSV_FILENAME, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
-                writer.writeheader()
+    if confirm:
+        st.info("🚫 Blocking users... please wait...")
 
-            for user in eligible[:num_to_block]:
-                try:
-                    client.app.bsky.graph.block.create(
-                        repo=client.me.did,
-                        record=models.AppBskyGraphBlock.Record(
-                            subject=user["did"],
-                            created_at=datetime.utcnow().isoformat() + "Z"
-                        )
+        client = Client()
+        client.login(username, app_password)
+
+        blocked = 0
+        with open(CSV_FILENAME, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+            writer.writeheader()
+
+        for user in eligible[:num_to_block]:
+            try:
+                client.app.bsky.graph.block.create(
+                    repo=client.me.did,
+                    record=models.AppBskyGraphBlock.Record(
+                        subject=user["did"],
+                        created_at=datetime.utcnow().isoformat() + "Z"
                     )
-                    blocked += 1
-                    st.write(f"✅ Blocked @{user['handle']} ({user['follows_count']} following)")
-                    save_to_csv({
-                        "Handle": user["handle"],
-                        "Follows Count": user["follows_count"],
-                        "DID": user["did"],
-                        "Blocked At": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-                    })
-                    time.sleep(2)
-                except Exception as e:
-                    st.warning(f"⚠️ Failed to block @{user['handle']}: {e}")
+                )
+                blocked += 1
+                st.write(f"✅ Blocked @{user['handle']} ({user['follows_count']} following)")
+                save_to_csv({
+                    "Handle": user["handle"],
+                    "Follows Count": user["follows_count"],
+                    "DID": user["did"],
+                    "Blocked At": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                })
+                time.sleep(2)
+            except Exception as e:
+                st.warning(f"⚠️ Failed to block @{user['handle']}: {e}")
 
-            st.success(f"🎉 Done. {blocked} new user(s) blocked.")
-            st.download_button("📥 Download Block Log", data=open(CSV_FILENAME, "rb"), file_name=CSV_FILENAME)
-
-    else:
-        st.info("No new users found who match the criteria.")
+        st.success(f"🎉 Done. {blocked} new user(s) blocked.")
+        st.download_button("📥 Download Block Log", data=open(CSV_FILENAME, "rb"), file_name=CSV_FILENAME)
 
 elif run_button:
     st.warning("Please enter your Bluesky credentials.")
